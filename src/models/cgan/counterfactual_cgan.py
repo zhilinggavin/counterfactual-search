@@ -1,5 +1,5 @@
-from functools import partial
 import itertools
+from functools import partial
 
 import lightning as L
 import numpy as np
@@ -47,7 +47,7 @@ class CounterfactualCGAN(nn.Module):
         # from the classifier probability for the explanation class using `posterior2bin` function
         self.num_bins = opt.num_bins  # number of bins for explanation
         self.ptb_based = opt.get('ptb_based', False)
-        
+
         self.enc = ResBlocksEncoder(opt.in_channels, **opt.get('enc_params', {}))
         self.gen = ResBlocksGenerator(self.num_bins, in_channels=self.enc.out_channels, **opt.get('gen_params', {}))
         self.disc = ResBlocksDiscriminator(self.num_bins, opt.in_channels, **opt.get('disc_params', {}))
@@ -66,9 +66,9 @@ class CounterfactualCGAN(nn.Module):
         self.lambda_kl = opt.get('lambda_kl', 1.0)
         self.lambda_rec = opt.get('lambda_rec', 1.0)
         self.lambda_minc = opt.get('lambda_minc', 1.0)
-        
+
         self.eps = opt.get('eps', 1e-8)
-        
+
         self.kl_clamp = self.eps
         # by default update both generator and discriminator on each training step
         self.gen_update_freq = opt.get('gen_update_freq', 1)
@@ -113,9 +113,9 @@ class CounterfactualCGAN(nn.Module):
         f_x = self.classifier_f(x)
         f_x = f_x.softmax(dim=1) if self.n_classes > 1 else f_x.sigmoid()
         f_x = f_x[:, [self.explain_class_idx]]
-        f_x_discrete = posterior2bin(f_x, self.num_bins)
+        f_x_discrete = posterior2bin(f_x, self.num_bins)  # return only 0 or 1
         # the posterior probabilities `c` we would like to obtain after the explanation image is fed into the classifier
-        f_x_desired = Variable(1.0 - f_x.detach(), requires_grad=False)
+        f_x_desired = (1.0 - f_x.detach()).requires_grad_(False)  # old version: f_x_desired = Variable(1.0 - f_x.detach(), requires_grad=False)
         f_x_desired_discrete = posterior2bin(f_x_desired, self.num_bins)
         return f_x, f_x_discrete, f_x_desired, f_x_desired_discrete
 
@@ -132,14 +132,14 @@ class CounterfactualCGAN(nn.Module):
         """
         Computes a reconstruction loss L_rec(E, G) that enforces self-consistency loss
         Formula 9 https://arxiv.org/pdf/2101.04230v3.pdf#page=7&zoom=100,30,412
-        
+
         real_imgs - input images that are explained
         gen_imgs - generated images with condition label 1 - f(x) (i.e computation of I_f(x, c))
         masks - semantic segmentation masks to be used for CARL loss to enforce local consistency for each label
         f_x_discrete - bin index for posterior probability f(x)
         f_x_desired_discrete - bin index for posterior probability 1 - f(x) (also known as desired probability)
         """
-        rec_fn = partial(CARL, masks=masks) if self.rec_kind.lower() == 'carl' else self.l1 
+        rec_fn = partial(CARL, masks=masks) if self.rec_kind.lower() == 'carl' else self.l1
         # I_f(x, f(x))
         ifx_fx = self.explanation_function(real_imgs, f_x_discrete, z=z)
         # L_rec(x, I_f(x, f(x)))
@@ -186,7 +186,7 @@ class CounterfactualCGAN(nn.Module):
         gen_imgs = self.gen(z, real_f_x_desired_discrete, x=real_imgs if self.ptb_based else None)
 
         update_generator = global_step is not None and global_step % self.gen_update_freq == 0
-        
+
         # data consistency loss for generator
         if update_generator or validation:
             dis_fake = self.disc(gen_imgs, real_f_x_desired_discrete)
@@ -199,14 +199,12 @@ class CounterfactualCGAN(nn.Module):
             # f(I_f(x, c)) ≈ c
             gen_f_x, _, _, _ = self.posterior_prob(gen_imgs)
             # both y_pred and y_target are single-value probs for class k
-            g_kl = (
-                self.lambda_kl * kl_divergence(gen_f_x, real_f_x_desired)
-                if self.lambda_kl != 0 else torch.tensor(0.0, requires_grad=True)
-            )
+            g_kl = self.lambda_kl * kl_divergence(gen_f_x, real_f_x_desired) if self.lambda_kl != 0 else torch.tensor(0.0, requires_grad=True)
             # reconstruction loss for generator
             g_rec_loss = (
                 self.lambda_rec * self.reconstruction_loss(real_imgs, gen_imgs, masks, real_f_x_discrete, real_f_x_desired_discrete, z=z)
-                if self.lambda_rec != 0 else torch.tensor(0.0, requires_grad=True)
+                if self.lambda_rec != 0
+                else torch.tensor(0.0, requires_grad=True)
             )
             # total generator loss
             g_loss = g_adv_loss + g_kl + g_rec_loss
@@ -230,7 +228,7 @@ class CounterfactualCGAN(nn.Module):
         if training:
             self.optimizer_D.zero_grad()
 
-        dis_real = self.disc(real_imgs, real_f_x_discrete) # changed from real_f_x_desired_discrete to real_f_x_discrete
+        dis_real = self.disc(real_imgs, real_f_x_discrete)  # changed from real_f_x_desired_discrete to real_f_x_discrete
         dis_fake = self.disc(gen_imgs.detach(), real_f_x_desired_discrete)
 
         # data consistency loss for discriminator (real and fake images)
@@ -239,7 +237,7 @@ class CounterfactualCGAN(nn.Module):
         else:
             d_real_loss = self.adversarial_loss(dis_real, valid)
             d_fake_loss = self.adversarial_loss(dis_fake, fake)
-        
+
         # total discriminator loss
         d_loss = (d_real_loss + d_fake_loss) / 2
 
@@ -259,7 +257,7 @@ class CounterfactualCGAN(nn.Module):
         }
         return outs
 
-    def generate_counterfactual(self, real_imgs:torch.Tensor) -> torch.Tensor:
+    def generate_counterfactual(self, real_imgs: torch.Tensor) -> torch.Tensor:
         real_f_x, real_f_x_discrete, real_f_x_desired, real_f_x_desired_discrete = self.posterior_prob(real_imgs)
         gen_cf_c = self.explanation_function(real_imgs, real_f_x_desired_discrete)
         diff = (real_imgs - gen_cf_c).abs()

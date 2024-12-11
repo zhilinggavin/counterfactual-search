@@ -1,0 +1,18 @@
+seed: 20
+task_name: segmentation
+model:
+  n_classes: 2
+  img_size: 256
+  learning_rate: 0.001
+  optimizer: adam
+  # loss_function: cross_entropy
+dataset:
+  name: fibrosis
+  img_size: 256
+  batch_size: 8
+#   num_workers: 4
+trainer:
+  epochs: 50
+  save_dir: /media/NAS06/gavinyue/disentanglement/benchmark/counterfactual-search/work_dir_fibrosis
+#   log_dir: /path/to/save/logs
+#   checkpoint_interval: 5

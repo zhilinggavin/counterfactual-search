@@ -1,5 +1,7 @@
 import torch
 from easydict import EasyDict as edict
+from flashtorch.saliency import Backprop
+from flashtorch.utils import apply_transforms, load_image
 from torchmetrics import F1Score, MetricCollection, Precision, Recall
 from tqdm import tqdm
 
@@ -10,9 +12,7 @@ from src.datasets.augmentations import get_transforms
 from src.models.classifier import ClassificationModel
 from src.trainers.trainer import BaseTrainer
 from src.utils.generic_utils import save_model
-from flashtorch.utils import apply_transforms, load_image
-from flashtorch.utils import apply_transforms, load_image
-from flashtorch.saliency import Backprop
+
 
 class ClassificationTrainer(BaseTrainer):
     def __init__(self, opt: edict, model: ClassificationModel, continue_path: str = None) -> None:
@@ -55,19 +55,22 @@ class ClassificationTrainer(BaseTrainer):
         epoch_steps = self.opt.get('epoch_steps')
         epoch_length = epoch_steps or len(loader)
         avg_pos_to_neg_ratio = 0.0
-        with tqdm(enumerate(loader), desc=f'Training epoch: {self.current_epoch}', leave=False, total=epoch_length) as prog:
+        with tqdm(enumerate(loader), desc=f'Training epoch: {self.current_epoch}', leave=False, total=epoch_length, ncols=100) as prog:
             for i, batch in prog:
                 if i == epoch_steps:
                     break
-                batch = {k: batch[k].to(self.device) for k in {'image', 'masks', 'label'}}
-                outs = self.model(batch, training=True, global_step=self.batches_done)
-                
+                try:
+                    batch = {k: batch[k].to(self.device) for k in {'image', 'masks', 'label'}}  # for kits dataset
+                except:
+                    batch = {k: batch[k].to(self.device) for k in {'image', 'mask', 'label'}}  # for fibrosis dataset
+                outs = self.model(batch, training=True, global_step=self.batches_done)  # {'loss','preds'}
+
                 avg_pos_to_neg_ratio += batch['label'].sum() / batch['label'].shape[0]
                 self.batches_done = self.current_epoch * len(loader) + i
-
+                # probs = torch.sigmoid(outs['preds'])
                 self.train_metrics.update(outs['preds'], batch['label'])
                 losses.append(outs['loss'])
-
+                # test = self.train_metrics.compute()
                 sample_step = self.batches_done % self.opt.sample_interval == 0
                 if sample_step:
                     prog.set_postfix_str('training_loss={:.5f}'.format(outs['loss'].item()), refresh=True)
@@ -86,12 +89,15 @@ class ClassificationTrainer(BaseTrainer):
         self.val_metrics.reset()
         losses = []
         num_pos = 0
-        for _, batch in tqdm(enumerate(loader), desc=f'Validation epoch: {self.current_epoch}', leave=False, total=len(loader)):
-            batch = {k: batch[k].to(self.device) for k in {'image', 'masks', 'label'}}
+        for _, batch in tqdm(enumerate(loader), desc=f'Validation epoch: {self.current_epoch}', leave=False, total=len(loader), ncols=100):
+            try:
+                batch = {k: batch[k].to(self.device) for k in {'image', 'masks', 'label'}}  # for kits dataset
+            except:
+                batch = {k: batch[k].to(self.device) for k in {'image', 'mask', 'label'}}  # for fibrosis dataset
             # print('val', batch['label'].sum())
             num_pos += batch['label'].sum()
             outs = self.model(batch, training=False)
-            
+
             self.val_metrics.update(outs['preds'], batch['label'])
             losses.append(outs['loss'])
         epoch_stats = {'loss': torch.mean(torch.tensor(losses)), **self.val_metrics.compute()}

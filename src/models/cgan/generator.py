@@ -54,10 +54,7 @@ class ResBlocksEncoder(nn.Module):
         self.blocks = nn.ModuleList(
             [
                 blocks.EncoderResBlock(64, out_channels[0], downsample_scales[0], use_snconv=use_snconv),
-                *(
-                    blocks.EncoderResBlock(out_channels[i-1], out_channels[i], downsample_scales[i], use_snconv=use_snconv)
-                    for i in range(1, self.n_blocks)
-                ),
+                *(blocks.EncoderResBlock(out_channels[i - 1], out_channels[i], downsample_scales[i], use_snconv=use_snconv) for i in range(1, self.n_blocks)),
             ]
         )
         self.latent_dim = out_channels[-1]
@@ -82,10 +79,10 @@ class ResBlocksGenerator(nn.Module):
     """Table 5(b) - https://arxiv.org/pdf/2101.04230v3.pdf"""
 
     def __init__(
-        self, 
-        n_classes, 
-        in_channels=[64, 128, 256, 512, 1024], 
-        upsample_scales=[2, 2, 2, 2, 2], 
+        self,
+        n_classes,
+        in_channels=[64, 128, 256, 512, 1024],
+        upsample_scales=[2, 2, 2, 2, 2],
         out_channels=[1024, 512, 256, 128, 64],
         upsample_kind='nearest',
         skip_conn=None,
@@ -98,13 +95,13 @@ class ResBlocksGenerator(nn.Module):
 
         self.skip_conn = set(skip_conn or [])
         in_channels = in_channels[::-1]
-        
+
         # print('Generator in channels', in_channels)
         # print('Generator out channels', out_channels)
         if skip_conn is None:
-            in_channels = [in_channels[0]] + [out_channels[i-1] for i in range(1, self.n_blocks)]
+            in_channels = [in_channels[0]] + [out_channels[i - 1] for i in range(1, self.n_blocks)]
         else:
-            in_channels = [in_channels[0]] + [out_channels[i-1] + (in_channels[i] if i in self.skip_conn else 0) for i in range(1, self.n_blocks)]
+            in_channels = [in_channels[0]] + [out_channels[i - 1] + (in_channels[i] if i in self.skip_conn else 0) for i in range(1, self.n_blocks)]
 
         print('Generator in channels', in_channels)
         print('Generator out channels', out_channels)
@@ -113,20 +110,22 @@ class ResBlocksGenerator(nn.Module):
         self.out_channels = out_channels
         self.blocks = nn.ModuleList(
             [
-                blocks.GeneratorResBlock(n_classes, in_channels[0], out_channels[0], 
-                                         scale_factor=upsample_scales[0], upsample_kind=upsample_kind, use_snconv=use_snconv),
+                blocks.GeneratorResBlock(
+                    n_classes, in_channels[0], out_channels[0], scale_factor=upsample_scales[0], upsample_kind=upsample_kind, use_snconv=use_snconv
+                ),
                 *(
-                    blocks.GeneratorResBlock(n_classes, in_channels[i], out_channels[i], 
-                                             scale_factor=upsample_scales[i], upsample_kind=upsample_kind, use_snconv=use_snconv)
+                    blocks.GeneratorResBlock(
+                        n_classes, in_channels[i], out_channels[i], scale_factor=upsample_scales[i], upsample_kind=upsample_kind, use_snconv=use_snconv
+                    )
                     for i in range(1, self.n_blocks)
                 ),
             ]
         )
         self.last_block = nn.Sequential(
             # TODO: think if relu -> BN is better
-            nn.BatchNorm2d(out_channels[-1]), 
+            nn.BatchNorm2d(out_channels[-1]),
             nn.ReLU(),
-            nn.Conv2d(out_channels[-1], 1, kernel_size=3, padding=1), 
+            nn.Conv2d(out_channels[-1], 1, kernel_size=3, padding=1),
         )
         self.ptb_fuse_type = ptb_fuse_type
         if self.ptb_fuse_type == 'skip_stack_3x3conv_tanh':
@@ -145,9 +144,9 @@ class ResBlocksGenerator(nn.Module):
         nn.init.xavier_uniform_(self.last_block[2].weight, torch.tensor(1.0))
 
     def forward(self, enc_features, labels, x=None, ret_features=False):
-        enc_features = enc_features[::-1] # revert the enc_features to begin with encoder head
-        outs = enc_features[0] # latent variable `z`; (B, 1024, 8, 8) for img_shape=(256, 256)
-        
+        enc_features = enc_features[::-1]  # revert the enc_features to begin with encoder head
+        outs = enc_features[0]  # latent variable `z`; (B, 1024, 8, 8) for img_shape=(256, 256)
+
         dec_features = {}
         for i, b in enumerate(self.blocks):
             # print(outs.shape)
@@ -158,8 +157,9 @@ class ResBlocksGenerator(nn.Module):
             if ret_features:
                 dec_features[f'dec_block_{i}'] = outs
         outs = self.last_block(outs)
-        if ret_features: dec_features['dec_last_block'] = outs
-        outs = self._build_img(outs, x)
+        if ret_features:
+            dec_features['dec_last_block'] = outs
+        outs = self._build_img(outs, x)  # outs.shape [b,1,256,256]
         return outs if not ret_features else (outs, dec_features)
 
     def _build_img(self, outs, x=None):

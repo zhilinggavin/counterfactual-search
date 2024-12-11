@@ -31,3 +31,7 @@ flake8_bugbear==23.6.5
 flake8_comprehensions==3.13.0
 flake8_simplify==0.20.0
 isort==5.12.0
+
+# Gavin added
+# flashtorch
+# batchgenerators

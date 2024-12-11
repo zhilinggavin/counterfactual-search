@@ -1,6 +1,7 @@
 from itertools import chain
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.utils.data import ConcatDataset
 
@@ -13,26 +14,31 @@ class CTScan(_CTScan):
         'sagittal': 1,  # side view
         'coronal': 2,  # front view
     }
-    
+
     def __getitem__(self, index):
         s = super().__getitem__(index)
-        s['image'] = s['image'].transpose(2, 1).flip(2)
-        if s['masks'].shape[0] != 0:
-            s['masks'] = s['masks'].transpose(2, 1).flip(2)
+        # s['image'] = s['image'].transpose(2, 1).flip(2)
+        # if s['masks'].shape[0] != 0:
+        #     s['masks'] = s['masks'].transpose(2, 1).flip(2)
         return s
-        
+
 
 class KITSDataset(torch.utils.data.Dataset):
-    def __init__(self, root_dir:str, split:str, split_dir:str='splits', limit_scans:int = 99999, **scan_params):
+    def __init__(self, root_dir: str, split: str, split_dir: str = 'splits', limit_scans: int = 99999, **scan_params):
         self.root_dir = Path(root_dir)
+        split_dir = Path(split_dir)
         self.split = split
-        
-        self.ann_path = self.root_dir / split_dir / f'{split}_scans.csv'
+
+        # self.ann_path = self.root_dir / split_dir / f'{split}_scans.csv'
+        # assert self.ann_path.exists()
+        # with open(self.ann_path, 'r') as fid:
+        #     scan_names = fid.read().splitlines()
+        # assert scan_names, f'No scans found in split: {self.ann_path}'
+
+        self.ann_path = split_dir / f'{split}.txt'
         assert self.ann_path.exists()
-        with open(self.ann_path, 'r') as fid:
-            scan_names = fid.read().splitlines()
-        assert scan_names, f'No scans found in split: {self.ann_path}'
-        
+        scan_names = np.loadtxt(self.ann_path, dtype=str).tolist()
+        # limit_scans = 10
         self.scans = []
         for i, sn in enumerate(scan_names):
             if i > limit_scans:

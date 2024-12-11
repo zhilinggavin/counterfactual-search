@@ -12,11 +12,11 @@ from torchsampler import ImbalancedDatasetSampler
 from src.datasets.kits_dataset import KITSDataset
 from src.datasets.lungs import LungsDataset
 from src.datasets.tsm_synth_dataset import TSMSyntheticDataset
-from src.datasets.tuh_dataset import TUHDataset
+from src.datasets.tuh_dataset import FibDataset, TUHDataset
 from src.utils.generic_utils import seed_everything
 
 
-def build_dataset(kind: str, root_dir: Path, split: str, transforms:albu.Compose, **kwargs):
+def build_dataset(kind: str, root_dir: Path, split: str, transforms: albu.Compose, **kwargs):
     scan_params = kwargs.pop('scan_params', {})
     if kind == 'clf-explain-lungs':
         return LungsDataset(root_dir, split, transforms=transforms, explain_classifier=True)
@@ -30,18 +30,25 @@ def build_dataset(kind: str, root_dir: Path, split: str, transforms:albu.Compose
         return TUHDataset(root_dir, split, transforms=transforms, **scan_params, **kwargs)
     elif kind == 'merged':
         return MergedDataset(split, transforms, kwargs['datasets'])
+    # Gavin added
+    elif kind == 'fibrosis':
+        return FibDataset(root_dir, split, transforms=transforms, **scan_params, **kwargs)
     else:
         raise ValueError(f'Unsupported dataset kind provided: {kind}')
 
 
 class MergedDataset(torch.utils.data.Dataset):
-    def __init__(self, split:str, transforms:albu.Compose, dataset_cfgs:list[dict]):
+    def __init__(self, split: str, transforms: albu.Compose, dataset_cfgs: list[dict]):
         assert dataset_cfgs, 'No datasets configured'
         # pprint(dataset_cfgs)
         self.split = split
         self.datasets = [build_dataset(split=split, transforms=transforms, **cfg) for cfg in dataset_cfgs]
         self.dataset = torch.utils.data.ConcatDataset(self.datasets)
-        self.classes = self.datasets[0].scans[0].classes
+        # self.classes = self.datasets[0].default_label[0]
+        try:
+            self.classes = self.datasets[0].scans[0].classes
+        except:
+            pass
 
     @property
     def scans(self):
@@ -50,6 +57,7 @@ class MergedDataset(torch.utils.data.Dataset):
     def get_sampling_labels(self):
         lbs = list(chain.from_iterable(dataset.get_sampling_labels() for dataset in self.datasets))
         print(f'[Merged dataset] Number of slices with positive sampling label:', sum(lbs))
+        print(f'[Merged dataset] Number of slices with negtive sampling label:', len(lbs) - sum(lbs))
         return lbs
 
     def __len__(self):
@@ -66,47 +74,70 @@ def seed_worker(worker_id):
 
 
 def get_dataloaders(params, data_transforms, sampler_labels=None, seed=42):
-    train_data = build_dataset(split='train', transforms=data_transforms['train'], **params)
+    test_mode = params.get('test', False)
+    if not test_mode:
+        train_data = build_dataset(split='train', transforms=data_transforms['train'], **params)
+        train_data[0]
+        sampler_labels_cache = Path(params.root_dir or '', 'sampler_labels.npy')
+        use_sampler = params.get('use_sampler', True)
+        if use_sampler and sampler_labels is None:
+            print('Using imbalanced sampler for training data loader.')
+            if sampler_labels_cache.exists() and not params.get('reset_sampler', True):
+                sampler_labels = numpy.load(sampler_labels_cache)
+            else:
+                print('Cached training sampler labels at:', sampler_labels_cache)
+                sampler_labels = train_data.get_sampling_labels() if sampler_labels is None else sampler_labels
+                numpy.save(sampler_labels_cache, sampler_labels)
 
-    sampler_labels_cache = Path(params.root_dir or '', 'sampler_labels.npy')
-    use_sampler = params.get('use_sampler', True)
-    if use_sampler and sampler_labels is None:
-        print('Using imbalanced sampler for training data loader.')
-        if sampler_labels_cache.exists() and not params.get('reset_sampler', True):
-            sampler_labels = numpy.load(sampler_labels_cache)
-        else:
-            sampler_labels = train_data.get_sampling_labels() if sampler_labels is None else sampler_labels
-            numpy.save(sampler_labels_cache, sampler_labels)
-            print('Cached training sampler labels at:', sampler_labels_cache)
+        train_sampler = (
+            ImbalancedDatasetSampler(train_data, labels=sampler_labels) if use_sampler else None
+        )  # increase the sampling frequency of less labeled data
+        print('Instantiated training dataset for number of samples:', len(train_data))
+        # if sampler_labels is None:
+        #     sampler_labels = train_data.get_sampling_labels()
+        val_data = build_dataset(split='val', transforms=data_transforms['val'], **params)
+        print('Instantiated validation dataset for number of samples:', len(val_data))
+        # val_sampler_labels = val_data.get_sampling_labels()
+        # numpy.save('val_sampler_labels.npy', val_sampler_labels)
 
-    train_sampler = ImbalancedDatasetSampler(train_data, labels=sampler_labels) if use_sampler else None
-    print('Instantiated training dataset for number of samples:', len(train_data))
+        rng = torch.Generator()
+        rng.manual_seed(seed)
 
-    test_data = build_dataset(split='test', transforms=data_transforms['val'], **params)
-    print('Instantiated validation dataset for number of samples:', len(test_data))
+        train_loader = torch.utils.data.DataLoader(
+            train_data,
+            sampler=train_sampler,
+            shuffle=train_sampler is None,
+            batch_size=params.batch_size,
+            pin_memory=True,
+            num_workers=params.num_workers,
+            # worker_init_fn=seed_worker,
+            generator=rng,
+        )
+        test_loader = torch.utils.data.DataLoader(
+            val_data,
+            batch_size=params.batch_size,
+            shuffle=params.get('shuffle_test', False),
+            pin_memory=True,
+            num_workers=params.num_workers,
+            # worker_init_fn=seed_worker,
+            generator=rng,
+        )
+    else:
+        val_data = build_dataset(split='test', transforms=data_transforms['val'], **params)
+        print('Instantiated validation dataset for number of samples:', len(val_data))
 
-    rng = torch.Generator()
-    rng.manual_seed(seed)
+        rng = torch.Generator()
+        rng.manual_seed(seed)
+        train_loader = None
+        test_loader = torch.utils.data.DataLoader(
+            val_data,
+            batch_size=1,
+            shuffle=params.get('shuffle_test', False),
+            pin_memory=True,
+            num_workers=params.num_workers,
+            generator=rng,
+        )
 
-    train_loader = torch.utils.data.DataLoader(
-        train_data,
-        sampler=train_sampler,
-        shuffle=train_sampler is None,
-        batch_size=params.batch_size,
-        pin_memory=True,
-        num_workers=params.num_workers, 
-        worker_init_fn=seed_worker,
-        generator=rng,
-    )
-    test_loader = torch.utils.data.DataLoader(
-        test_data,
-        batch_size=params.batch_size,
-        shuffle=params.get('shuffle_test', False),
-        pin_memory=True,
-        num_workers=params.num_workers,
-        worker_init_fn=seed_worker,
-        generator=rng,
-    )
     return train_loader, test_loader
 
 

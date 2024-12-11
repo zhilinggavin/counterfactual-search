@@ -7,7 +7,7 @@ from torchvision import models
 from tqdm import tqdm
 
 
-def _rgb_to_gray_conv(in_conv:torch.nn.Conv2d, in_channels:int) -> torch.nn.Conv2d:
+def _rgb_to_gray_conv(in_conv: torch.nn.Conv2d, in_channels: int) -> torch.nn.Conv2d:
     # reset input layer to accept grayscale images
     conv1 = torch.nn.Conv2d(
         in_channels,
@@ -26,22 +26,23 @@ def _rgb_to_gray_conv(in_conv:torch.nn.Conv2d, in_channels:int) -> torch.nn.Conv
     return conv1
 
 
-def _reinit_resnet(model: models.ResNet, in_channels:int, n_classes:int) -> torch.nn.Module:
+def _reinit_resnet(model: models.ResNet, in_channels: int, n_classes: int) -> torch.nn.Module:
     # reset input layer to accept grayscale images
     model.conv1 = _rgb_to_gray_conv(model.conv1, in_channels)
     # reset the classification layer
     model.fc = nn.Linear(model.fc.in_features, n_classes)
     return model
 
+
 # models.vit_b_16
 # models.vit_b_16
-def _reinit_vit(model: models.VisionTransformer, in_channels:int, n_classes:int) -> torch.nn.Module:
+def _reinit_vit(model: models.VisionTransformer, in_channels: int, n_classes: int) -> torch.nn.Module:
     model.conv_proj = _rgb_to_gray_conv(model.conv_proj, in_channels)
     model.heads[-1] = nn.Linear(model.heads[-1].in_features, n_classes)
     return model
 
 
-def _reinit_effnet_v2(model: models.EfficientNet, in_channels:int, n_classes:int) -> torch.nn.Module:
+def _reinit_effnet_v2(model: models.EfficientNet, in_channels: int, n_classes: int) -> torch.nn.Module:
     # models.efficientnet_v2
     model.features[0][0] = _rgb_to_gray_conv(model.features[0][0], in_channels)
     model.classifier[-1] = nn.Linear(model.classifier[-1].in_features, n_classes)
@@ -49,7 +50,7 @@ def _reinit_effnet_v2(model: models.EfficientNet, in_channels:int, n_classes:int
 
 
 # models.convnext_tiny
-def _reinit_convnext(model: models.ConvNeXt, in_channels:int, n_classes:int) -> models.ConvNeXt:
+def _reinit_convnext(model: models.ConvNeXt, in_channels: int, n_classes: int) -> models.ConvNeXt:
     model.features[0][0] = _rgb_to_gray_conv(model.features[0][0], in_channels)
     model.classifier[-1] = nn.Linear(model.classifier[-1].in_features, n_classes)
     return model
@@ -119,12 +120,17 @@ class ClassificationModel(torch.nn.Module):
 
         if training:
             self.optimizer.zero_grad()
-        outputs = self.model(inputs)  # B x n_classes
-        loss = self.loss(outputs, labels.float().unsqueeze(1))
+        outputs = self.model(inputs)  # [B x n_classes]
+        try:
+            loss = self.loss(outputs, labels.float().unsqueeze(1))  # for kits dataset
+            outputs = outputs.squeeze(1)
+        except:
+            loss = self.loss(outputs, labels.float())  # for fibrosis dataset
 
         if training:
             loss.backward()
             self.optimizer.step()
 
-        outs = {'loss': loss, 'preds': outputs.squeeze(1)}
+        outs = {'loss': loss, 'preds': outputs}
+
         return outs

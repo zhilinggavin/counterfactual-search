@@ -6,12 +6,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 from easydict import EasyDict as edict
+from torchmetrics.classification import BinaryJaccardIndex, Dice
 from torchmetrics.image.fid import FrechetInceptionDistance
-from torchmetrics.classification import BinaryJaccardIndex
 from torchvision.utils import save_image
 from tqdm import tqdm
 
-from src.visualizations import confmat_vis_img
 from src.datasets import get_dataloaders
 from src.datasets.augmentations import get_transforms
 from src.models.cgan import CounterfactualCGAN
@@ -19,6 +18,7 @@ from src.models.classifier import compute_sampler_condition_labels, predict_prob
 from src.trainers.trainer import BaseTrainer
 from src.utils.avg_meter import AvgMeter
 from src.utils.generic_utils import save_model
+from src.visualizations import confmat_vis_img
 
 
 class CounterfactualTrainer(BaseTrainer):
@@ -26,7 +26,7 @@ class CounterfactualTrainer(BaseTrainer):
         super().__init__(opt, model, continue_path)
         self.cf_vis_dir_train = self.logging_dir / 'counterfactuals/train'
         self.cf_vis_dir_train.mkdir(exist_ok=True, parents=True)
-        
+
         self.cf_vis_dir_val = self.logging_dir / 'counterfactuals/val'
         self.cf_vis_dir_val.mkdir(exist_ok=True)
 
@@ -34,11 +34,12 @@ class CounterfactualTrainer(BaseTrainer):
         # 64, 192, 768, 2048
         self.fid_features = opt.get('fid_features', 768)
         self.val_fid = FrechetInceptionDistance(self.fid_features, normalize=True).to(self.device)
-        
+
         self.cf_gt_seg_mask_idx = opt.get('cf_gt_seg_mask_idx', -1)
         self.cf_threshold = opt.get('cf_threshold', 0.25)
         self.val_iou_xc = BinaryJaccardIndex(self.cf_threshold).to(self.device)
         self.val_iou_xfx = BinaryJaccardIndex(self.cf_threshold).to(self.device)
+        self.val_dice_xc = Dice(num_classes=1, multiclass=False, threshold=self.cf_threshold).to(self.device)
 
     def restore_state(self):
         latest_ckpt = max(self.ckpt_dir.glob('*.pth'), key=lambda p: int(p.name.replace('.pth', '').split('_')[1]))
@@ -54,9 +55,9 @@ class CounterfactualTrainer(BaseTrainer):
     def save_state(self) -> str:
         return save_model(self.opt, self.model, (self.model.optimizer_G, self.model.optimizer_D), self.batches_done, self.current_epoch, self.ckpt_dir)
 
-    def get_dataloaders(self, ret_cf_labels:bool=False, skip_cf_sampler=True) -> tuple:
+    def get_dataloaders(self, ret_cf_labels: bool = False, skip_cf_sampler=True) -> tuple:
         transforms = get_transforms(self.opt.dataset)
-        if self.opt.task_name == 'counterfactual' and not skip_cf_sampler: # NB
+        if self.opt.task_name == 'counterfactual' and not skip_cf_sampler:  # NB
             # compute sampler labels to create batches with uniformly distributed labels
             params = edict(deepcopy(self.opt.dataset), use_sampler=False, shuffle_test=False)
             # GAN's train data is expected to be classifier's validation data
@@ -76,30 +77,34 @@ class CounterfactualTrainer(BaseTrainer):
 
         stats = AvgMeter()
         epoch_steps = self.opt.get('epoch_steps')
-        with tqdm(enumerate(loader), desc=f'Training epoch {self.current_epoch}', leave=False, total=epoch_steps or len(loader)) as prog:
+
+        with tqdm(enumerate(loader), desc=f'Training epoch {self.current_epoch}', leave=False, total=epoch_steps or len(loader), ncols=120) as prog:
             for i, batch in prog:
+                # for i, batch in tqdm(enumerate(loader), desc=f'Training epoch {self.current_epoch}', leave=False, total=epoch_steps or len(loader)):
                 if i == epoch_steps:
                     break
                 self.batches_done = self.current_epoch * len(loader) + i
                 sample_step = self.batches_done % self.opt.sample_interval == 0
                 outs = self.model(batch, training=True, compute_norms=sample_step and self.compute_norms, global_step=self.batches_done)
-                stats.update(outs['loss'])
+                stats.update(outs['loss'])  # out = {'loss', 'gen_imgs'}
                 if sample_step:
                     if self.opt.get('log_visualizations', True):
                         save_image(outs['gen_imgs'][:16].data, self.vis_dir / ('%d_train_%d.jpg' % (self.current_epoch, i)), nrow=4, normalize=True)
-                    postf = '[Batch %d/%d] [D loss: %f] [G loss: %f]' % (i, len(loader), outs['loss']['d_loss'], outs['loss']['g_loss'])
+                    postf = '[Batch %d] [D loss: %.4f] [G loss: %.4f]' % (i, outs['loss']['d_loss'], outs['loss']['g_loss'])
                     prog.set_postfix_str(postf, refresh=True)
                     if self.compute_norms:
                         for model_name, norms in self.model.norms.items():
                             self.logger.log(norms, self.batches_done, f'{model_name}_gradients_norm')
+                torch.cuda.empty_cache()
+
         epoch_stats = stats.average()
         if self.current_epoch % self.opt.eval_counter_freq == 0:
-            epoch_stats.update(self.evaluate_counterfactual(loader, phase='train'))
+            epoch_stats.update(self.evaluate_counterfactual(loader, phase='train', skip_fid=False))
         self.logger.log(epoch_stats, self.current_epoch, 'train')
         self.logger.info(
             '[Finished training epoch %d/%d] [Epoch D loss: %f] [Epoch G loss: %f]'
             % (self.current_epoch, self.opt.n_epochs, epoch_stats['d_loss'], epoch_stats['g_loss'])
-        )
+        )  # return keys: ['g_adv', 'g_kl', 'g_rec_loss', 'g_minc_loss', 'g_tv', 'g_loss', 'd_real_loss', 'd_fake_loss', 'd_loss', 'counter_acc', 'cv_80', 'fid', 'cf_iou_xc'])
         return epoch_stats
 
     @torch.no_grad()
@@ -109,20 +114,30 @@ class CounterfactualTrainer(BaseTrainer):
         stats = AvgMeter()
         avg_pos_to_neg_ratio = 0.0
         for i, batch in tqdm(enumerate(loader), desc=f'Validation epoch {self.current_epoch}', leave=False, total=len(loader)):
+            # if i >= 51: debug
+            #     break
             avg_pos_to_neg_ratio += batch['label'].sum() / batch['label'].shape[0]
             outs = self.model(batch, validation=True)
             stats.update(outs['loss'])
             if i % self.opt.sample_interval == 0 and self.opt.get('vis_gen', True):
                 save_image(outs['gen_imgs'][:16].data, self.vis_dir / ('%d_val_%d.jpg' % (self.batches_done, i)), nrow=4, normalize=True)
-        self.logger.info('[Average positives/negatives ratio in batch: %f]' % round(avg_pos_to_neg_ratio.item() / len(loader), 3))
+        self.logger.info('[Average positives/all ratio in batch: %f]' % round(avg_pos_to_neg_ratio.item() / len(loader), 3))
         epoch_stats = stats.average()
         if self.current_epoch % self.opt.eval_counter_freq == 0:
-            epoch_stats.update(self.evaluate_counterfactual(loader, phase='val'))
+            epoch_stats.update(self.evaluate_counterfactual(loader, phase='val', skip_fid=False))
         self.logger.log(epoch_stats, self.current_epoch, 'val')
         self.logger.info(
             '[Finished validation epoch %d/%d] [Epoch D loss: %f] [Epoch G loss: %f]'
             % (self.current_epoch, self.opt.n_epochs, epoch_stats['d_loss'], epoch_stats['g_loss'])
         )
+        return epoch_stats
+
+    @torch.no_grad()
+    def test_epoch(self, loader: torch.utils.data.DataLoader) -> None:
+        self.model.eval()
+
+        epoch_stats = self.test_counterfactual(loader, phase='val', skip_fid=True)
+
         return epoch_stats
 
     @torch.no_grad()
@@ -168,7 +183,7 @@ class CounterfactualTrainer(BaseTrainer):
 
             # computes I_f(x, c)
             gen_cf_c = self.model.explanation_function(real_imgs, real_f_x_desired_discrete)
-            
+
             # computes I_f(x, f(x))
             gen_cf_fx = self.model.explanation_function(real_imgs, real_f_x_discrete)
             # print(real_f_x_discrete.shape, gen_cf_fx.shape, real_imgs.shape)
@@ -186,36 +201,46 @@ class CounterfactualTrainer(BaseTrainer):
 
             # compute difference maps, threshold and compute IoU
             # |x - x_c|
-            diff = (real_imgs - gen_cf_c).abs() # [0; 1] values
+            diff = (real_imgs - gen_cf_c).abs()  # [0; 1] values
             diff_seg = (diff > self.cf_threshold).byte()
-            
+
             # |x_fx - x_c|
-            diff2 = (gen_cf_fx - gen_cf_c).abs() # [0; 1] values
+            diff2 = (gen_cf_fx - gen_cf_c).abs()  # [0; 1] values
             diff2_seg = (diff2 > self.cf_threshold).byte()
-            
+
             abnormal_mask = labels.bool()
             if abnormal_mask.any():
                 pred_num_abnormal_samples += abnormal_mask.sum()
                 self.val_iou_xc.update(diff_seg[abnormal_mask].squeeze(1), cf_gt_masks[abnormal_mask].squeeze(1))
                 self.val_iou_xfx.update(diff2_seg[abnormal_mask].squeeze(1), cf_gt_masks[abnormal_mask].squeeze(1))
-            
+
             # diff3 = (real_imgs[0] - gen_cf_fx[0]).abs() # [0; 1] values
-            vis = torch.stack((
-                real_imgs[0], torch.zeros_like(real_imgs[0]), torch.zeros_like(real_imgs[0]), 
-                gen_cf_c[0], diff[0], diff_seg[0],
-                gen_cf_fx[0], diff2[0], diff2_seg[0],
-            ), dim=0).permute(0, 2, 3, 1)
+            vis = torch.stack(
+                (
+                    real_imgs[0],
+                    torch.zeros_like(real_imgs[0]),
+                    torch.zeros_like(real_imgs[0]),
+                    gen_cf_c[0],
+                    diff[0],
+                    diff_seg[0],
+                    gen_cf_fx[0],
+                    diff2[0],
+                    diff2_seg[0],
+                ),
+                dim=0,
+            ).permute(0, 2, 3, 1)
             vis = torch.cat((vis, vis, vis), 3)
             vis_confmat = confmat_vis_img(cf_gt_masks[0].unsqueeze(0).unsqueeze(0), diff_seg[0].unsqueeze(0), normalized=True)[0]
-            vis[1] = 0.3*vis[0] + 0.7 * vis_confmat
+            vis[1] = 0.3 * vis[0] + 0.7 * vis_confmat
             vis[2] = vis_confmat
             vis = vis.permute(0, 3, 1, 2)
-            
+
             # save first example for visualization
-            vis_path = cf_dir / (f'epoch_%d_counterfactual_%d_label_%d_true_%d_pred_%d.jpg' % (
-                self.current_epoch, i, labels[0], real_f_x_desired_discrete[0][0], gen_f_x_discrete[0][0])
+            vis_path = cf_dir / (
+                f'epoch_%d_counterfactual_%d_label_%d_true_%d_pred_%d.jpg'
+                % (self.current_epoch, i, labels[0], real_f_x_desired_discrete[0][0], gen_f_x_discrete[0][0])
             )
-            save_image(vis.data, vis_path, nrow=3, normalize=False) # value_range=(-1, 1))
+            save_image(vis.data, vis_path, nrow=3, normalize=False)  # value_range=(-1, 1))
 
             if not skip_fid:
                 # Evaluate Frechet Inception Distance (FID)
@@ -223,7 +248,7 @@ class CounterfactualTrainer(BaseTrainer):
                 real_imgs = nn.functional.interpolate(real_imgs, size=(299, 299), mode='bilinear', align_corners=False)
                 real_imgs = real_imgs.repeat_interleave(repeats=3, dim=1)
                 self.val_fid.update(real_imgs, real=True)
-                
+
                 # upsample to InceptionV3's resolution and convert to RGB
                 gen_cf_c = nn.functional.interpolate(gen_cf_c, size=(299, 299), mode='bilinear', align_corners=False)
                 gen_cf_c = gen_cf_c.repeat_interleave(repeats=3, dim=1)
@@ -244,11 +269,15 @@ class CounterfactualTrainer(BaseTrainer):
 
         cf_iou_xc = self.val_iou_xc.compute().item()
         self.val_iou_xc.reset()
-        self.logger.info(f'IoU(S, Sc) = {cf_iou_xc:.3f} (cf_thresh={self.cf_threshold}, num_samples={pred_num_abnormal_samples}, mask={self.cf_gt_seg_mask_idx})')
+        self.logger.info(
+            f'IoU(S, Sc) = {cf_iou_xc:.3f} (cf_thresh={self.cf_threshold}, num_samples={pred_num_abnormal_samples}, mask={self.cf_gt_seg_mask_idx})'
+        )
 
         cf_iou_xfx = self.val_iou_xfx.compute().item()
         self.val_iou_xfx.reset()
-        self.logger.info(f'IoU(S, Sfx) = {cf_iou_xfx:.3f} (cf_thresh={self.cf_threshold}, num_samples={pred_num_abnormal_samples}, mask={self.cf_gt_seg_mask_idx})')
+        self.logger.info(
+            f'IoU(S, Sfx) = {cf_iou_xfx:.3f} (cf_thresh={self.cf_threshold}, num_samples={pred_num_abnormal_samples}, mask={self.cf_gt_seg_mask_idx})'
+        )
 
         fid_score = None
         if not skip_fid:
@@ -256,8 +285,10 @@ class CounterfactualTrainer(BaseTrainer):
             fid_score = self.val_fid.compute().item()
             self.logger.info(f'FID(X, Xc) = {fid_score:.3f} (num_samples={num_samples}, features={self.fid_features})')
             self.val_fid.reset()
-        
-        self.logger.info(f'Ratio of true abnormal slices to classified as abnormal slices: {pred_num_abnormal_samples / (max(true_num_abnormal_samples, 1e-8))}')
+
+        self.logger.info(
+            f'Ratio of true abnormal slices to classified as abnormal slices: {pred_num_abnormal_samples / (max(true_num_abnormal_samples, 1e-8))}'
+        )
         return {
             'counter_acc': cacc,
             f'cv_{int(tau*100)}': cv_score,

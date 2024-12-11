@@ -22,17 +22,7 @@
         "languageServer*/**": true,
         ".vscode-test": true,
     },
-    "[python]": {
-        "editor.formatOnSave": true,
-        "editor.codeActionsOnSave": {
-            "source.organizeImports": true
-        },
-        "editor.defaultFormatter": "ms-python.black-formatter"
-    },
-    "[YAML]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode",
-        "editor.formatOnSave": true
-    },
+
     "python.analysis.ignore": [
         "training_logs/",
         ".venv"
@@ -40,9 +30,7 @@
     "python.linting.enabled": false,
     "python.formatting.provider": "none",
     "python.sortImports.args": ["--profile", "black"],
-    "editor.codeActionsOnSave": {
-        "source.fixAll.eslint": true
-    },
+
     "python.languageServer": "Default",
     "python.linting.pylintEnabled": false,
     "python.linting.flake8Enabled": true,

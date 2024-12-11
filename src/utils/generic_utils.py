@@ -11,9 +11,12 @@ import torch
 
 
 def seed_everything(seed: int):
-    import random, os
+    import os
+    import random
+
     import numpy as np
     import torch
+
     os.environ['PYTHONHASHSEED'] = str(seed)
     os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':16:8'
     random.seed(seed)
@@ -28,17 +31,18 @@ def seed_everything(seed: int):
 def get_commit_hash():
     """https://stackoverflow.com/questions/14989858/get-the-current-git-hash-in-a-python-script"""
     try:
-        commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
+        commit = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode().strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
-        commit = "0000000"
+        commit = '0000000'
     return commit
 
 
 def get_experiment_folder_path(root_path, model_name, experiment_name='exp'):
     """Get an experiment folder path with the current date and time"""
-    date_str = datetime.datetime.now().strftime("%B-%d-%Y_%I+%M%p")
-    commit_hash = get_commit_hash()
-    output_folder = os.path.join(root_path, model_name + "-" + date_str + "-" + commit_hash + '-' + experiment_name)
+    date_str = datetime.datetime.now().strftime('%B-%d-%Y_%I+%M%p')
+    # commit_hash = get_commit_hash()
+    # output_folder = os.path.join(root_path, model_name + "-" + date_str + "-" + commit_hash + '-' + experiment_name)
+    output_folder = os.path.join(root_path, model_name + '-' + date_str + '-' + experiment_name)
     os.makedirs(output_folder, exist_ok=True)
     return output_folder
 
@@ -53,7 +57,7 @@ def setup_logger(name, log_file=None, message_format='[%(asctime)s|%(levelname)s
     logger.setLevel(level)
 
     formatter = logging.Formatter(message_format, datefmt=r'%Y-%m-%d %H:%M:%S')
-    
+
     if log_file:
         fh = logging.FileHandler(log_file, mode='w', encoding='utf8')
         fh.setFormatter(formatter)
@@ -66,8 +70,7 @@ def setup_logger(name, log_file=None, message_format='[%(asctime)s|%(levelname)s
     return logger
 
 
-def save_model(config:dict, model:torch.nn.Module, optimizers:List[torch.nn.Module], 
-               current_step:int, epoch:int, checkpoint_dir:Path, **kwargs) -> Path:
+def save_model(config: dict, model: torch.nn.Module, optimizers: List[torch.nn.Module], current_step: int, epoch: int, checkpoint_dir: Path, **kwargs) -> Path:
     state = {
         'config': config,
         'model': model.state_dict(),
