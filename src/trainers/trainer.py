@@ -117,15 +117,20 @@ class BaseTrainer:
                 self.logger.info(f'Saved checkpoint parameters at epoch {self.current_epoch}: {ckpt_path}')
             self.current_epoch += 1
 
-    def fit_val(self, wandb_logger=None):
+    def fit_val(self, wandb_logger=None, genlabel1 = False):
         import csv
 
         import numpy as np
 
         data_loaders = self.get_dataloaders()
-        _, val_loader = data_loaders
-
-        epoch_stats_val = self.test_epoch(val_loader)
+        if genlabel1:
+            val_loader, _ = data_loaders #this is train_loader.
+        else:
+            _, val_loader = data_loaders
+        if genlabel1:
+            epoch_stats_val = self.test_epoch_genlabel1(val_loader)
+        else:
+            epoch_stats_val = self.test_epoch(val_loader)
         dice_list = epoch_stats_val['each_dice']
         median_dice = np.median(dice_list)
         mean_dice = np.mean(dice_list)

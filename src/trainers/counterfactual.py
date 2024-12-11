@@ -139,6 +139,14 @@ class CounterfactualTrainer(BaseTrainer):
         epoch_stats = self.test_counterfactual(loader, phase='val', skip_fid=True)
 
         return epoch_stats
+    
+    @torch.no_grad()
+    def test_epoch_genlabel1(self, loader: torch.utils.data.DataLoader) -> None:
+        self.model.eval()
+
+        epoch_stats = self.test_counterfactual_genlabel1(loader, phase='val', skip_fid=True)
+
+        return epoch_stats
 
     @torch.no_grad()
     def evaluate_counterfactual(self, loader, phase='val', tau=0.8, skip_fid=False, postprocess_morph=False):

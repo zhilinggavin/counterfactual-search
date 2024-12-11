@@ -195,6 +195,6 @@ saved_models/
 *.7z
 *.out
 data
-seg_results/
+seg_results*/
 tools/wandb/
 kits23/
