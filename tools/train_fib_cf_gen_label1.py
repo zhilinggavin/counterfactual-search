@@ -33,8 +33,8 @@ def main(args):
     logging.info('Started training.')
 
     expriment = None
-    # wandb.init(project="COIN", name="cf_inpainting_fibrosis", config=opt)
-    # expriment = wandb.run
+    wandb.init(project="COIN", name="cf_inpainting_fibrosis_genlable1", config=opt)
+    expriment = wandb.run
 
     trainer.fit(wandb_logger=expriment)
     logging.info('Finished training.')
