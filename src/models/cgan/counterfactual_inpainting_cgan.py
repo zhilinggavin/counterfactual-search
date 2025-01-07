@@ -22,20 +22,23 @@ class CounterfactualInpaintingCGAN(CounterfactualCGAN):
         # { 
         
         # Original Code! Recover the original code after debugging!!!
-        # # mask of what samples classifier predicted as `abnormal`
-        # inpaint_group = f_x_discrete.bool()  # True is abnormal
-        # # `abnormalities` need to be inpainted and classifier should predict `normal` on them
-        # f_x_desired[inpaint_group] = 1e-6
-        # f_x_desired_discrete[inpaint_group] = 0  # should be all zeros
+        # mask of what samples classifier predicted as `abnormal`
+        inpaint_group = f_x_discrete.bool()  # True is abnormal
+        # `abnormalities` need to be inpainted and classifier should predict `normal` on them
+        f_x_desired[inpaint_group] = 1e-6
+        f_x_desired_discrete[inpaint_group] = 0  # should be all zeros
         
         # }
         
+        # {
+            
+        # #TODO  debug!!! please remove after debugging!!!
+        # # gen label 1 from 0. Get synthetic abnormalities data!!
+        # inpaint_group = f_x_discrete.bool()
+        # f_x_desired[~inpaint_group] = 1 - 1e-6
+        # f_x_desired_discrete[~inpaint_group] = 1
         
-        #TODO  debug!!! please remove after debugging!!!
-        # gen label 1 from 0. Get synthetic abnormalities data!!
-        inpaint_group = f_x_discrete.bool()
-        f_x_desired[~inpaint_group] = 1 - 1e-6
-        f_x_desired_discrete[~inpaint_group] = 1
+        # }
         
         return f_x, f_x_discrete, f_x_desired, f_x_desired_discrete
 

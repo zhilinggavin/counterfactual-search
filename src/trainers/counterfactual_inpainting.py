@@ -194,7 +194,7 @@ class CounterfactualInpaintingTrainer(CounterfactualTrainer):
             cf_gt_masks = cf_gt_masks.unsqueeze(1)
             labels = batch['label']
             true_num_abnormal_samples += labels.sum()
-            B = labels.shape[0]
+            # B = labels.shape[0]
 
             self.model: CounterfactualInpaintingCGAN
             real_f_x, real_f_x_discrete, real_f_x_desired, real_f_x_desired_discrete = self.model.posterior_prob(real_imgs)
@@ -322,7 +322,7 @@ class CounterfactualInpaintingTrainer(CounterfactualTrainer):
         
     @torch.no_grad()
     def test_counterfactual_genlabel1(self, loader, phase='val', tau=0.8, skip_fid=False, postprocess_morph: bool = False):
-        # copy based on test_counterfactual
+        # copy based on test_counterfactual, this function is used to generate counterfactuals with desired label 1. From 0 to 1
         self.model.eval()
 
         cf_dir = self.cf_vis_dir_train if phase == 'train' else self.cf_vis_dir_val
@@ -481,6 +481,68 @@ class CounterfactualInpaintingTrainer(CounterfactualTrainer):
             'cf_dice_xc': cf_dice_xc,
             'each_dice': each_dice,
         }
+        
+    @torch.no_grad()
+    def infer_counterfactual(self, loader, phase='val', tau=0.8, skip_fid=False, postprocess_morph: bool = False):
+        self.model.eval()
+
+        cf_dir = self.cf_vis_dir_train if phase == 'train' else self.cf_vis_dir_val
+
+        cv_y_true, cv_y_pred = [], []
+        posterior_true, posterior_pred = [], []
+
+        train_eval_epoch = len(loader)
+
+
+        for i, batch in tqdm(enumerate(loader), desc='Validating counterfactuals', leave=False, total=train_eval_epoch or len(loader), ncols=120):
+            # if i == 10:
+            #     break
+
+            # Evaluate Counterfactual Validity Metric
+            real_imgs = batch['image'].cuda(non_blocking=True)
+            name = batch['scan_name'][0]
+            self.model: CounterfactualInpaintingCGAN
+            real_f_x, real_f_x_discrete, real_f_x_desired, real_f_x_desired_discrete = self.model.posterior_prob(real_imgs)
+
+            # our ground truth is the `flipped` labels
+            cv_y_true.extend(real_f_x_desired_discrete.cpu().squeeze(1).numpy())
+            posterior_true.extend(real_f_x.cpu().squeeze(1).numpy())
+
+
+            # computes I_f(x, c)
+            gen_cf_c = self.model.explanation_function(real_imgs, real_f_x_desired_discrete)
+
+            # computes f(x_c)
+            gen_f_x, gen_f_x_discrete, _, _ = self.model.posterior_prob(gen_cf_c)
+            # our prediction is the classifier's label for the generated images given the desired posterior probability
+            cv_y_pred.extend(gen_f_x_discrete.cpu().squeeze(1).numpy())
+            posterior_pred.extend(gen_f_x.cpu().squeeze(1).numpy())
+
+            # denorm values from [-1; 1] to [0, 1] range, B x 1 x H x W
+            real_imgs.add_(1).div_(2)
+            gen_cf_c.add_(1).div_(2)
+
+            # compute difference maps, threshold and compute IoU
+            # |x - x_c|
+            diff = (real_imgs - gen_cf_c).abs()  # [0, 1] range
+            diff_seg = (diff > self.cf_threshold).byte()  # uint8
+            # diff_seg_np = diff_seg.detach().cpu().numpy().squeeze()*256
+            # Image.fromarray(diff_seg_np).save('diff_seg.png')
+            if postprocess_morph:
+                diff_seg = self.postprocess_morph(diff_seg)
+
+
+
+
+            seg = diff_seg.squeeze()
+            seg = seg.flip((0, 1)).transpose(1, 0).cpu().numpy()
+            seg = (seg * 255).astype(np.uint8)
+
+            tmp_dir = '/media/NAS06/gavinyue/disentanglement/benchmark/counterfactual-search/australia_seg_results'
+            Image.fromarray(seg).save(f'{tmp_dir}/{name}_mask.png')
+        
+        print('Segmentation inference done, image saved to', tmp_dir)
+
 
     def postprocess_morph(self, masks: torch.Tensor):
         masks_np = masks.cpu().numpy().squeeze(1)

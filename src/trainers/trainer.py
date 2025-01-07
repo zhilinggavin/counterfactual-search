@@ -59,6 +59,28 @@ class BaseTrainer:
     @torch.no_grad()
     def validation_epoch(self, loader: torch.utils.data.DataLoader) -> dict:
         """Runs a validation epoch for a given loader and returns the results, which can include epoch loss, metrics, etc"""
+    
+    @torch.no_grad()
+    def test_epoch(self, loader: torch.utils.data.DataLoader) -> dict:
+        """Runs a validation epoch for a given loader and returns the results, which can include epoch loss, metrics, etc"""
+        
+    @torch.no_grad()
+    def infer_epoch(self, loader: torch.utils.data.DataLoader) -> dict:
+        """Runs a validation epoch for a given loader and returns the results, which can include epoch loss, metrics, etc"""  
+    
+    @torch.no_grad()
+    def test_epoch_genlabel1(self, loader: torch.utils.data.DataLoader) -> dict:
+        """Runs a validation epoch for a given loader and returns the results, which can include epoch loss, metrics, etc"""
+        
+    @abstractmethod
+    def test_counterfactual(self, loader: torch.utils.data.DataLoader) -> dict:
+        """Runs a training epoch for a given loader and returns the results, which can include epoch loss, metrics, etc""" 
+    
+    @abstractmethod
+    def infer_counterfactual(self, loader: torch.utils.data.DataLoader) -> dict:
+        """Runs a training epoch for a given loader and returns the results, which can include epoch loss, metrics, etc"""     
+        
+    
 
     @abstractmethod
     def get_dataloaders(self) -> tuple[torch.utils.data.DataLoader]:
@@ -142,7 +164,7 @@ class BaseTrainer:
             print(f'Median Dice: {median_dice}')
             print(f'Mean Dice: {mean_dice}')
 
-        file_path = '/media/NAS06/gavinyue/disentanglement/benchmark/counterfactual-search/dice_score.csv'
+        file_path = '/media/NAS06/gavinyue/disentanglement/benchmark/counterfactual-search/test_dice_score.csv'
         with open(file_path, mode='w', newline='') as file:
             writer = csv.writer(file)
             writer.writerow(['Dice Value'])
@@ -151,3 +173,38 @@ class BaseTrainer:
                 writer.writerow([dice_value])
 
         print(f'dice_list has been written to {file_path}')
+
+    def infer(self, wandb_logger=None, genlabel1 = False):
+        import csv
+
+        import numpy as np
+
+        data_loaders = self.get_dataloaders()
+        if genlabel1:
+            val_loader, _ = data_loaders #this is train_loader.
+        else:
+            _, val_loader = data_loaders
+        if genlabel1:
+            epoch_stats_val = self.test_epoch_genlabel1(val_loader)
+        else:
+            epoch_stats_val = self.infer_epoch(val_loader)
+        # dice_list = epoch_stats_val['each_dice']
+        # median_dice = np.median(dice_list)
+        # mean_dice = np.mean(dice_list)
+
+        # try:
+        #     logging.info(f'Median Dice: {median_dice}')
+        #     logging.info(f'Mean Dice: {mean_dice}')
+        # except:
+        #     print(f'Median Dice: {median_dice}')
+        #     print(f'Mean Dice: {mean_dice}')
+
+        # file_path = '/media/NAS06/gavinyue/disentanglement/benchmark/counterfactual-search/test_dice_score.csv'
+        # with open(file_path, mode='w', newline='') as file:
+        #     writer = csv.writer(file)
+        #     writer.writerow(['Dice Value'])
+        #     # Write the dice_list to the CSV file
+        #     for dice_value in dice_list:
+        #         writer.writerow([dice_value])
+
+        # print(f'dice_list has been written to {file_path}')

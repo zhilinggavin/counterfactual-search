@@ -12,7 +12,7 @@ from torchsampler import ImbalancedDatasetSampler
 from src.datasets.kits_dataset import KITSDataset
 from src.datasets.lungs import LungsDataset
 from src.datasets.tsm_synth_dataset import TSMSyntheticDataset
-from src.datasets.tuh_dataset import FibDataset, TUHDataset
+from src.datasets.tuh_dataset import FibDataset, TUHDataset, AustraliaDataset
 from src.utils.generic_utils import seed_everything
 
 
@@ -33,6 +33,8 @@ def build_dataset(kind: str, root_dir: Path, split: str, transforms: albu.Compos
     # Gavin added
     elif kind == 'fibrosis':
         return FibDataset(root_dir, split, transforms=transforms, **scan_params, **kwargs)
+    elif kind == 'AustraliaDataset':
+        return AustraliaDataset(root_dir, split, transforms=transforms, **scan_params, **kwargs)
     else:
         raise ValueError(f'Unsupported dataset kind provided: {kind}')
 
@@ -125,7 +127,7 @@ def get_dataloaders(params, data_transforms, sampler_labels=None, seed=42):
     else:
         val_data = build_dataset(split='test', transforms=data_transforms['val'], **params)
         print('Instantiated validation dataset for number of samples:', len(val_data))
-
+        batch = val_data[0]
         rng = torch.Generator()
         rng.manual_seed(seed)
         train_loader = None

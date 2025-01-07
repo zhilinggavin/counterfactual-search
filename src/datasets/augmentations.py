@@ -36,7 +36,7 @@ def get_transforms(opt):
     if 'shift_scale_rotate' in opt.augs:
         train_ops.append(albu.ShiftScaleRotate(scale_limit=0.1, rotate_limit=10, shift_limit=0.07, p=0.5, border_mode=cv2.BORDER_CONSTANT, value=0))
 
-    if 'fib' in opt.datasets[0]['kind']:
+    if 'fib' in opt.datasets[0]['kind'] or 'AustraliaDataset' in opt.datasets[0]['kind']:
         data_transforms = {
             'train': albu.Compose(
                 [*train_ops, albu.Resize(*opt.img_size, cv2.INTER_LINEAR), albu.ToFloat(), albu.Normalize(mean, std, max_pixel_value=max_pixel_value)]

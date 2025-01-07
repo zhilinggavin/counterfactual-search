@@ -252,3 +252,97 @@ class FibDataset(torch.utils.data.Dataset):
 
     def __str__(self) -> str:
         return self.name
+
+class AustraliaDataset(torch.utils.data.Dataset):
+    from typing import Union
+
+    import albumentations as albu
+
+    slicing_dims = {
+        'sagittal': 0,  # side view
+        'coronal': 1,  # front view
+        'axial': 2,  # top down view
+    }
+
+    def __init__(
+        self,
+        root_dir,
+        split,
+        split_dir,
+        norm_scheme: dict = {'kind': 'minmax'},
+        transforms: albu.Compose = None,
+        min_max_normalization: bool = True,
+        slicing_direction: str = 'axial',
+        classes: list[str] = ('empty', 'fibrosis'),
+        sampling_class: str = None,
+        classify_labels: str = None,
+        classify_labels_thresh: int = 32,
+        filter_class_slices: str = None,
+        filter_class_slices_thresh: int = 32,
+        synth_params: dict = None,
+        load_masks: Union[bool, list] = False,
+        default_label: int = None,
+        blur_background_sigma: int = None,
+        counterfactual_val: bool = False,
+    ):
+        super().__init__()
+        # root_dir = '/media/NAS06/gavinyue/disentanglement/scripts_segmentation/unet_train_test/quantification_result/02_00019'
+        self.root_dir = Path(root_dir)
+        self.img_dir = self.root_dir
+
+        self.counterfactual_val = counterfactual_val
+
+        self.names = os.listdir(self.root_dir)
+        self.names = [name.removesuffix('.png') for name in self.names if name.endswith('.png')]
+
+        self.min_max_norm = min_max_normalization
+        self.transforms = transforms #resize to 256
+        self.slicing_dim = self.slicing_dims[slicing_direction]
+
+        self.sampling_class = sampling_class
+
+        self.load_masks = load_masks
+
+
+
+
+    def get_ith_slice(self, volume: np.ndarray, index: int) -> np.ndarray:
+        return volume[self._get_slicer(index)]
+
+    def get_split_name(self):
+        if  self.split == 'test':
+            self.ann_path = self.split_dir / f'{self.split}.txt'
+            test_name = np.loadtxt(self.ann_path, dtype=str).tolist()
+            names = test_name
+        else:
+            raise ValueError(f'Invalid split: {self.split}')
+
+        return names
+
+    def __len__(self):
+        return len(self.names)
+
+    def __getitem__(self, index):
+
+        img_path = self.img_dir / (self.names[index] + '.png')
+
+        scan_slice = np.asarray(imageio.imread(img_path)).astype(np.uint8)
+        scan_slice = scan_slice[:, :, 0]
+
+        sample = {'image': scan_slice}
+        if self.transforms:
+            sample = self.transforms(**sample)
+
+        sample['image'] = torch.from_numpy(sample['image'])
+
+        sample['scan_name'] = self.names[index]
+        sample['slice_index'] = index
+
+        sample['image'] = sample['image'].transpose(1, 0).flip((0, 1))
+        sample['image'] = sample['image'].unsqueeze(0)
+
+
+        return sample
+
+    def __str__(self) -> str:
+        return self.name

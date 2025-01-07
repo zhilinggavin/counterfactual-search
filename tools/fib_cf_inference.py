@@ -39,13 +39,21 @@ def main(args):
     expriment = None
     # wandb.init(project="COIN", name="cf_inpainting_fibrosis", config=opt)
     # expriment = wandb.run
-    # opt.dataset['test'] = True
-    # opt.dataset.test = True
-    trainer.fit_val(wandb_logger=expriment, genlabel1=True)
-    logging.info('Finished training.')
+    opt.dataset['test'] = True
+
+    opt.dataset.datasets[0]['kind'] = 'AustraliaDataset'
+    opt.dataset.datasets[0]['root_dir'] = '/media/NAS06/gavinyue/disentanglement/scripts_segmentation/unet_train_test/quantification_result/02_00019'
+    opt.dataset.datasets[0].scan_params['load_masks'] = False
+    trainer.infer(wandb_logger=expriment)
+    logging.info('Finished infer.')
 
 
 if __name__ == '__main__':
+    '''
+    This script is used to evaluate the counterfactual inference on the fibrosis dataset, from label 0 to 1.
+    fibrosis seg model dataset input: shape (1, 1, 256, 256), dtype float32, range [-1, 1]
+    if mask is provided for evaluation: shape (1, 1, 256, 256), dtype uint8, range [0, 1]
+    '''
     args = parser.parse_args()
     # args.config_path = (
     #     '/media/NAS06/gavinyue/disentanglement/benchmark/counterfactual-search/configs/counterfactual/paper_experiments/tuh/cf_inpainting_fibrosis.yaml'
