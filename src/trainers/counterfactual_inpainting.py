@@ -486,7 +486,8 @@ class CounterfactualInpaintingTrainer(CounterfactualTrainer):
     def infer_counterfactual(self, loader, phase='val', tau=0.8, skip_fid=False, postprocess_morph: bool = False):
         self.model.eval()
 
-        cf_dir = self.cf_vis_dir_train if phase == 'train' else self.cf_vis_dir_val
+
+        save_dir = self.save_dir
 
         cv_y_true, cv_y_pred = [], []
         posterior_true, posterior_pred = [], []
@@ -538,10 +539,11 @@ class CounterfactualInpaintingTrainer(CounterfactualTrainer):
             seg = seg.flip((0, 1)).transpose(1, 0).cpu().numpy()
             seg = (seg * 255).astype(np.uint8)
 
-            tmp_dir = '/media/NAS06/gavinyue/disentanglement/benchmark/counterfactual-search/australia_seg_results'
-            Image.fromarray(seg).save(f'{tmp_dir}/{name}_mask.png')
+            # save_dir = '/media/NAS06/gavinyue/disentanglement/benchmark/counterfactual-search/australia_seg_results'
+            save_name = f'{save_dir}/{name}_mask.png'
+            Image.fromarray(seg).save(save_name)
         
-        print('Segmentation inference done, image saved to', tmp_dir)
+        print('Segmentation inference done, image saved to', save_dir)
 
 
     def postprocess_morph(self, masks: torch.Tensor):
