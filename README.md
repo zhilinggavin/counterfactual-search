@@ -1,13 +1,6 @@
 # <img src='demo/logo.png' height=25/> COIN: Counterfactual inpainting for weakly supervised semantic segmentation for medical images
 
-<!-- [![arXiv](https://img.shields.io/badge/soon.svg?logo=arXiv)](https://arxiv.org/coming-soon) -->
-<!-- [![License](https://img.shields.io/badge/License-Apache%202.0-yellow)](https://github.com/LICENSE)  -->
-[![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2FDmytro-Shvetsov%2Fcounterfactual-search&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=hits&edge_flat=false)](https://hits.seeyoufarm.com)
-[![GitHub issues](https://img.shields.io/github/issues/Dmytro-Shvetsov/counterfactual-search/GiT?color=critical&label=Issues)](https://github.com/Dmytro-Shvetsov/counterfactual-search/issues?q=is%3Aopen+is%3Aissue+)
-[![GitHub closed issues](https://img.shields.io/github/issues-closed/Dmytro-Shvetsov/counterfactual-search/GiT?color=success&label=Issues)](https://github.com/Dmytro-Shvetsov/counterfactual-search/issues?q=is%3Aissue+is%3Aclosed+)  <br>
-
-
-This repo is the official implementation of the paper: [COIN: Counterfactual inpainting for weakly supervised semantic segmentation for medical images](https://arxiv.org/coming-soon).
+This repo is the implementation of the paper: [COIN: Counterfactual inpainting for weakly supervised semantic segmentation for medical images](https://arxiv.org/coming-soon).
 
 ## 🤔 Introduction
 Deep learning is dramatically transforming the field of medical imaging and radiology, enabling the identification of pathologies in
@@ -82,13 +75,17 @@ bash tools/train.py -c <config_path>
 bash bash tools/eval_counterfactual.py -cp <model_dir> -cft 0.25 -pcf
 ```
 
-<!-- ## 📘 Citation
-Please consider citing our work as follows if it is helpful.
-```
-@article{,
-    title={},
-    author={},
-    journal={},
-    year={2024}
-}
-``` -->
+---
+# COIN as Benchmark
+## Datasets
+- Kits23
+- OSIC Fibrosis
+- AIPFR (Australia Fibrosis)
+
+## Configs
+Load configs in `configs/` before any train, infer
+### Inference
+- AIPFR: `benchmark/counterfactual-search/tools/fib_cf_inference.py`
+
+## Customised inference, evaluation scripts in tools
+Added train, inference, evaluation scripts in `tools/`

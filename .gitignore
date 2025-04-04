@@ -200,3 +200,4 @@ tools/wandb/
 kits23/
 australia_seg_results/
 australia_seg_results_test/
+*seg_results*/

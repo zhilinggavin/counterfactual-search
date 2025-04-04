@@ -133,7 +133,8 @@ class FibDataset(torch.utils.data.Dataset):
 
         self.counterfactual_val = counterfactual_val
         self.names = self.get_split_name()
-
+        if self.names[0].endswith(('.png', '.jpg', '.jpeg')):
+            self.names = [Path(name).stem for name in self.names]
         self.min_max_norm = min_max_normalization
         self.transforms = transforms
         self.slicing_dim = self.slicing_dims[slicing_direction]
@@ -211,44 +212,71 @@ class FibDataset(torch.utils.data.Dataset):
         return len(self.names)
 
     def __getitem__(self, index):
-        if 'cov' in self.names[index]:
-            img_path = self.img_dir_0 / (self.names[index] + '.png')
-            scan_slice = np.asarray(imageio.imread(img_path)).astype(np.uint8)
-            scan_slice = scan_slice[:, :, 0]
-
-            mask = np.zeros_like(scan_slice).astype(np.uint8)
-            label = np.zeros(1)
-        else:
+        if 'data/OSIC/processed/fibrosis' in self.root_dir.as_posix():
+            # get item for OSIC dataset from new repository 'genai-wsss'. 
+            # Now only check for inference for test split.
+            self.img_dir = self.root_dir
             img_path = self.img_dir / (self.names[index] + '.png')
-            label_path = self.label_dir / (self.names[index] + '_mask.png')
+
             scan_slice = np.asarray(imageio.imread(img_path)).astype(np.uint8)
             scan_slice = scan_slice[:, :, 0]
-            label_slice = np.asarray(imageio.imread(label_path))
-            label_slice = (label_slice / 255).astype(np.uint16)
-            assert scan_slice.shape == label_slice.shape, 'Shapes of provided scan and labels volumes do not match'
 
-            classes = self.load_masks if isinstance(self.load_masks, list) else self.classes
-            mask = (label_slice == self.class_to_idx[classes[-1]]).astype(np.uint8)
-            label = np.ones(1)
+            sample = {'image': scan_slice}
+            if self.transforms:
+                sample = self.transforms(**sample)
 
-        sample = {'image': scan_slice, 'mask': mask}
-        if self.transforms:
-            sample = self.transforms(**sample)
+            sample['image'] = torch.from_numpy(sample['image'])
 
-        sample['image'] = torch.from_numpy(sample['image'])
-        sample['mask'] = torch.from_numpy(np.stack(sample['mask']))
-        sample['label'] = torch.tensor(label).long()
-        sample['scan_name'] = self.names[index]
-        sample['slice_index'] = index
+            sample['scan_name'] = self.names[index]
+            sample['slice_index'] = index
 
-        sample['image'] = sample['image'].transpose(1, 0).flip((0, 1))
-        sample['image'] = sample['image'].unsqueeze(0)
+            sample['image'] = sample['image'].transpose(1, 0).flip((0, 1))
+            sample['image'] = sample['image'].unsqueeze(0)
 
-        sample['mask'] = sample['mask'].transpose(1, 0).flip((0, 1))
-        sample['mask'] = sample['mask'].unsqueeze(0)
 
-        # plt.imsave('image.png', sample['image'].numpy(), cmap='gray')
-        return sample
+            return sample
+            
+        
+        else:
+            # Old repository, 'fid_dataset/fibrosis/orig, mask'
+            if 'cov' in self.names[index]:
+                img_path = self.img_dir_0 / (self.names[index] + '.png')
+                scan_slice = np.asarray(imageio.imread(img_path)).astype(np.uint8)
+                scan_slice = scan_slice[:, :, 0]
+
+                mask = np.zeros_like(scan_slice).astype(np.uint8)
+                label = np.zeros(1)
+            else:
+                img_path = self.img_dir / (self.names[index] + '.png')
+                label_path = self.label_dir / (self.names[index] + '_mask.png')
+                scan_slice = np.asarray(imageio.imread(img_path)).astype(np.uint8)
+                scan_slice = scan_slice[:, :, 0]
+                label_slice = np.asarray(imageio.imread(label_path))
+                label_slice = (label_slice / 255).astype(np.uint16)
+                assert scan_slice.shape == label_slice.shape, 'Shapes of provided scan and labels volumes do not match'
+
+                classes = self.load_masks if isinstance(self.load_masks, list) else self.classes
+                mask = (label_slice == self.class_to_idx[classes[-1]]).astype(np.uint8)
+                label = np.ones(1)
+
+            sample = {'image': scan_slice, 'mask': mask}
+            if self.transforms:
+                sample = self.transforms(**sample)
+
+            sample['image'] = torch.from_numpy(sample['image'])
+            sample['mask'] = torch.from_numpy(np.stack(sample['mask']))
+            sample['label'] = torch.tensor(label).long()
+            sample['scan_name'] = self.names[index]
+            sample['slice_index'] = index
+
+            sample['image'] = sample['image'].transpose(1, 0).flip((0, 1))
+            sample['image'] = sample['image'].unsqueeze(0)
+
+            sample['mask'] = sample['mask'].transpose(1, 0).flip((0, 1))
+            sample['mask'] = sample['mask'].unsqueeze(0)
+
+            # plt.imsave('image.png', sample['image'].numpy(), cmap='gray')
+            return sample
 
     def __str__(self) -> str:
         return self.name
